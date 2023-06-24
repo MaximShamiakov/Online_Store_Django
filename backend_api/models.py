@@ -1,9 +1,6 @@
 from django.db import models
-
-
 # временная зона в которой мы находимся
 from django.utils import timezone
-
 # стондартные user django
 from django.contrib.auth.models import User
 
@@ -39,3 +36,20 @@ class Material(models.Model):
         # related_name='user_materials' - получение всех материалов у автора к которым он имеет отнашения
         related_name="user_materials",
     )
+
+
+class NewUser(models.Model):
+    name = models.CharField(max_length=30)
+    email = models.CharField(max_length=255, unique=True)
+    password = models.CharField(max_length=30)
+
+
+class NewKey(models.Model):
+    key = models.CharField(max_length=128, unique=True)
+    user = models.ForeignKey(NewUser, on_delete=models.CASCADE)
+
+
+class Basket(models.Model):
+    key = models.CharField(max_length=255, default='')
+    product_id = models.CharField(max_length=255, default='')
+    quantity = models.PositiveBigIntegerField()

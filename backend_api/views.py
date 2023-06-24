@@ -1,39 +1,14 @@
-# from django.shortcuts import render
 from rest_framework.views import APIView
-# from . import models
 from .models import Material
-# from .serializer import MaterialSerializers
 from rest_framework.response import Response
-# Объекты Q обеспечивают полный контроль над пунктом where запроса.
 from django.db.models import Q
 from django.http import JsonResponse
-# from django.http import HttpResponse
-# Create your views here.
-# РЕГИСТРАЦИЯ
-# csrf_exempt
-# пользователя выполнить нежелательное действие на доверенном сайте,
-# на котором пользователь авторизован.
 from django.views.decorators.csrf import csrf_exempt
-# User являются ядром системы аутентификации.
-# Они обычно представляют людей, взаимодействующих с вашим сайтом,
-# и используются для таких вещей,
-# как ограничение доступа, регистрация профилей пользователей,
-# ассоциирование контента с создателями и т.д.
-from django.contrib.auth.models import User
+from .models import NewUser, NewKey, Basket
+from django.http import HttpResponse
+import bcrypt
 import json
-# АУТЕНТИФИКАЦИЯ
-# authenticate() проверка учетных данных.
-# Она принимает учетные данные в качестве аргументов ключевых слов,
-# username и password по умолчанию,
-# сверяет их с каждым authentication backend и возвращает объект User
-from django.contrib.auth import authenticate
-from rest_framework_simplejwt.tokens import RefreshToken
-# Использование класса APIView практически не отличается от использования обычного класса View,
-# как обычно, входящий запрос отправляется в соответствующий метод-обработчик,
-# такой как .get() или .post().
-# Кроме того, для класса может быть установлен ряд атрибутов,
-# которые контролируют различные аспекты политики API.
-from rest_framework.decorators import api_view
+from uuid import uuid4
 
 
 class MaterialView(APIView):
@@ -59,57 +34,65 @@ class MaterialView(APIView):
 def get_filtered_products(request):
     min_price = request.GET.get('min_price')
     max_price = request.GET.get('max_price')
-#  Q используется для создания сложных запросов в базу данных и
-# комбинировать несколько условий с помощью логических операторов ИЛИ и И.
     products = Material.objects.filter(
         Q(price__gte=min_price) & Q(price__lte=max_price))
 
-    # возвращаем отфильтрованные товары
     return JsonResponse({'data': list(products.values())})
 
 
 @csrf_exempt
-def user_registration(request):
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            name = data['name']
-            email = data['email']
-            password = data['password']
-            user = User.objects.create_user(
-                username=email, email=email, password=password)
-            user.first_name = name
-            user.save()
-            return JsonResponse({'message': 'Пользователь успешно зарегистрирован'}, status=201)
-        except:
-            return JsonResponse({'error': 'Неверный запрос'}, status=400)
-    else:
-        return JsonResponse({'error': 'Метод не поддерживается'}, status=405)
+def new_reg(request):
+    post = json.loads(request.body)
+    name = post.get('username')
+    email = post.get('email')
+    password = post.get('password')
+    hashed_password = bcrypt.hashpw(password.encode(
+        'utf-8'), bcrypt.gensalt()).decode('utf-8')
+    new_user = NewUser(email=email, password=hashed_password, name=name)
+    new_user.save()
+    key = str(uuid4())
+    new_key = NewKey(user=new_user, key=key)
+    new_key.save()
+    return HttpResponse(json.dumps({'key': new_key.key, 'name': new_user.name}), status=201)
 
 
-# @csrf_exempt
-
-
-# api_view По умолчанию принимаются только методы GET.
-# Другие методы будут отвечать "405 Method Not Allowed".
-# Чтобы изменить это поведение, укажите, какие методы разрешены представлению,
-@api_view(['POST'])
-def login(request):
-    email = request.data.get('email')
-    password = request.data.get('password')
-    user = authenticate(username=email, password=password)
-    if user is None:
-        return Response({'error': 'Неверный email или пароль'}, status=400)
-    refresh = RefreshToken.for_user(user)
-    return Response({'access': str(refresh.access_token), 'refresh': str(refresh)}, status=200)
-
-
-# @api_view(['POST'])
-def refresh_token(request):
-    refresh_token = request.data.get('refresh_token')
+@csrf_exempt
+def new_login(request):
+    post = json.loads(request.body)
+    email = post.get('email')
+    password = post.get('password')
+    new_user = None
     try:
-        token = RefreshToken(refresh_token)
-        access_token = str(token.access_token)
-        return Response({'access': access_token}, status=200)
-    except Exception as e:
-        return Response({'error': str(e)}, status=400)
+        new_user = NewUser.objects.get(email=email)
+    except Exception:
+        return HttpResponse({'message': 'User not found'}, status=401)
+    new_key = None
+    try:
+        new_key = NewKey.objects.get(user=new_user)
+    except Exception:
+        return HttpResponse({'message': 'User key not found'}, status=401)
+    if bcrypt.checkpw(password.encode('utf-8'), new_user.password.encode('utf-8')):
+        return HttpResponse(json.dumps({'name': new_user.name, 'key': new_key.key}), status=200)
+    else:
+        return HttpResponse({'message': 'Wrong password'}, status=401)
+
+
+@csrf_exempt
+def basket(request):
+    post = json.loads(request.body)
+    key = post.get('key')
+    product_id = post.get('product_id')
+    quantity = post.get('quantity')
+    if quantity == 0:  # если количество равно 0, то удаляем модель из базы
+        try:
+            basket = Basket.objects.get(key=key, product_id=product_id)
+            basket.delete()
+        except Basket.DoesNotExist:
+            pass
+    else:  # если количество не равно 0, то обновляем или создаем модель в базе
+        basket, created = Basket.objects.get_or_create(
+            key=key, product_id=product_id, defaults={'quantity': quantity})
+        if not created:
+            basket.quantity = quantity
+            basket.save()
+    return HttpResponse(json.dumps({'key': basket.key, 'product_id': basket.product_id, 'quantity': basket.quantity}), status=200)
