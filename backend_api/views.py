@@ -61,20 +61,43 @@ def new_login(request):
     post = json.loads(request.body)
     email = post.get('email')
     password = post.get('password')
-    new_user = None
     try:
         new_user = NewUser.objects.get(email=email)
-    except Exception:
-        return HttpResponse({'message': 'User not found'}, status=401)
-    new_key = None
-    try:
-        new_key = NewKey.objects.get(user=new_user)
-    except Exception:
-        return HttpResponse({'message': 'User key not found'}, status=401)
-    if bcrypt.checkpw(password.encode('utf-8'), new_user.password.encode('utf-8')):
-        return HttpResponse(json.dumps({'name': new_user.name, 'key': new_key.key}), status=200)
-    else:
-        return HttpResponse({'message': 'Wrong password'}, status=401)
+        if bcrypt.checkpw(password.encode('utf-8'), new_user.password.encode('utf-8')):
+            new_key = NewKey.objects.get(user=new_user)
+            key = new_key.key
+            baskets = Basket.objects.filter(key=key)
+            if not baskets:
+                response_data = {'name': new_user.name, 'key': new_key.key}
+            else:
+                product_ids = [basket.product_id for basket in baskets]
+                materials = Material.objects.filter(idProduct__in=product_ids)
+                products = []
+                for material in materials:
+                    basket = next(
+                        (b for b in baskets if b.product_id == material.idProduct), None)
+                    if basket:
+                        products.append({
+                            'idProduct': material.idProduct,
+                            'title': material.title,
+                            'name': material.name,
+                            'img': material.img,
+                            'brand': material.brand,
+                            'price': material.price,
+                            'screenSize': material.screenSize,
+                            'memoryCard': material.memoryCard,
+                            'cpu': material.cpu,
+                            'videoCard': material.videoCard,
+                            'quantity': basket.quantity
+                        })
+                        print(products)
+                response_data = {'name': new_user.name,
+                                 'key': new_key.key, 'products': products}
+            return HttpResponse(json.dumps(response_data), status=200)
+        else:
+            return HttpResponse(json.dumps({'error': 'Invalid login credentials'}), status=401)
+    except NewUser.DoesNotExist:
+        return HttpResponse(json.dumps({'error': 'Invalid login credentials'}), status=401)
 
 
 @csrf_exempt
