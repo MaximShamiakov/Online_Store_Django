@@ -10,5 +10,6 @@ urlpatterns = [
     path('products', get_filtered_products, name='get_filtered_products'),
     path("new_reg/", new_reg, name="new_reg"),
     path("new_login/", new_login, name="new_login"),
-    path("basket/", basket, name="basket")
+    path("basket/", basket, name="basket"),
+    path("basket_add/", BasketAdd.as_view(), name="basket_add")
 ]
